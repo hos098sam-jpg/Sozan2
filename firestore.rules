@@ -1,0 +1,318 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ========================= HELPERS =========================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string
+        && id.size() >= 1
+        && id.size() <= 128
+        && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isEmailVerifiedAdmin() {
+      return isAuthenticated()
+        && request.auth.token.email == 'hos098sam@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'admin' ||
+        isEmailVerifiedAdmin() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 1. تبسيط التحقق من المدرس لتوفير آلاف القراءات المجانية
+    function isTeacher() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'teacher' ||
+        isAdmin()
+      );
+    }
+
+    function isParent() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'parent' ||
+        exists(/databases/$(database)/documents/parents/$(request.auth.uid))
+      );
+    }
+
+    function isParentOf(studentId) {
+      return isParent()
+        && exists(/databases/$(database)/documents/parents/$(request.auth.uid))
+        && studentId in get(/databases/$(database)/documents/parents/$(request.auth.uid)).data.linkedStudentIds;
+    }
+
+    // 2. السماح بتسجيل طلاب كل الصفوف الدراسية (بدل حصرهم في أولى ثانوي فقط)
+    function isValidPublicStudentCreate(userId) {
+      return isValidId(userId)
+        && isOwner(userId)
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 120
+        && !request.resource.data.keys().hasAny(['password', 'admin', 'isAdmin'])
+        && request.resource.data.role == 'student'
+        && request.resource.data.status == 'active'
+        && request.resource.data.schoolYear is string
+        && (!request.resource.data.keys().hasAny(['enrolledCourseIds'])
+            || (request.resource.data.enrolledCourseIds is list
+                && request.resource.data.enrolledCourseIds.size() == 0))
+        && (!request.resource.data.keys().hasAny(['walletBalance'])
+            || request.resource.data.walletBalance == 0);
+    }
+
+    function isValidPublicStudentSelfUpdate(userId) {
+      return isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role', 'status', 'password', 'enrolledCourseIds',
+          'uid', 'id', 'email', 'walletBalance', 'admin', 'isAdmin'
+        ]);
+    }
+
+    function isValidTeacherStudentEnrollmentUpdate() {
+      return isTeacher()
+        && resource.data.role == 'student'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'enrolledCourseIds', 'status', 'updatedAt'
+        ]);
+    }
+
+    // ========================= ADMIN ALLOWLIST =========================
+    match /admins/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false;   // يُدار من Admin SDK فقط
+    }
+
+    match /test/connection {
+      allow get: if true;
+      allow list, write: if false;
+    }
+
+    // ========================= USERS =========================
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin() || isTeacher() || isParentOf(userId);
+      allow list: if isAdmin() || isTeacher();
+
+      allow create: if (isAdmin() && !request.resource.data.keys().hasAny(['password']))
+        || (isTeacher()
+            && request.resource.data.role == 'assistant'
+            && !request.resource.data.keys().hasAny(['password', 'admin', 'isAdmin']))
+        || (isOwner(userId)
+            && request.auth.token.email == 'almtflsft@gmail.com'
+            && request.resource.data.role == 'teacher'
+            && !request.resource.data.keys().hasAny(['password', 'admin', 'isAdmin']))
+        || isValidPublicStudentCreate(userId);
+
+      allow update: if isAdmin()
+        || (isTeacher()
+            && resource.data.role == 'assistant'
+            && request.resource.data.role == 'assistant'
+            && !request.resource.data.keys().hasAny(['password', 'admin', 'isAdmin']))
+        || (isOwner(userId)
+            && request.auth.token.email == 'almtflsft@gmail.com'
+            && request.resource.data.role == 'teacher'
+            && !request.resource.data.keys().hasAny(['password', 'admin', 'isAdmin']))
+        || isValidPublicStudentSelfUpdate(userId)
+        || isValidTeacherStudentEnrollmentUpdate();
+
+      allow delete: if isAdmin()
+        || (isTeacher() && resource.data.role == 'assistant');
+    }
+
+    // ========================= EXAMS / ANSWERS =========================
+    match /exams/{examId} {
+      allow read, write: if isAdmin() || isTeacher();
+    }
+    match /question_banks/{bankId} {
+      allow read, write: if isAdmin() || isTeacher();
+    }
+    match /model_answers/{answerId} {
+      allow read, write: if isAdmin() || isTeacher();
+    }
+    match /exam_answers/{answerId} {
+      allow read, write: if isAdmin() || isTeacher();
+    }
+
+    // ========================= ADMIN / LOGS / CODES =========================
+    match /admin/{document=**} {
+      allow read, write: if isAdmin();
+    }
+    match /admin_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+    match /coupons/{couponId} {
+      allow read, write: if isAdmin() || isTeacher();
+    }
+    match /access_codes/{codeId} {
+      // الأدمن والمعلمة المالكة فقط (منع الطلاب والمساعدين)
+      allow read, write: if isAdmin() || isTeacher();
+    }
+
+    // ========================= INVOICES / ORDERS =========================
+    match /fawaterak_invoices/{invoiceId} {
+      allow get: if isAdmin()
+        || (isAuthenticated() && resource.data.studentId == request.auth.uid);
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow get: if isAdmin() || isTeacher()
+        || (isAuthenticated() && resource.data.studentId == request.auth.uid);
+      allow list: if isAdmin() || isTeacher();
+      allow create: if isValidId(orderId)
+        && isAuthenticated()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == 'Pending'
+        && request.resource.data.finalAmount is number
+        && request.resource.data.finalAmount > 0
+        && request.resource.data.studentName is string
+        && request.resource.data.studentName.size() <= 120;
+      // اعتماد أو رفض الأوردر للأدمن والمعلمة المالكة فقط
+      allow update, delete: if isAdmin() || isTeacher();
+    }
+
+    // ========================= SYNCED DATA =========================
+    // ملاحظة: التعليمات المدرسية ممنوعة من الكتابة على users/accessCodes/coupons
+    match /al_motafalsifa_data/{docId} {
+      // قراءة عامة للكتالوج والتنبيهات فقط
+      allow get: if docId in ['courses', 'settings', 'competitions', 'notifications', 'bundles']
+        || (
+             (docId in ['users', 'accessCodes', 'submissions', 'exams', 'coupons', 'support_chats']
+              || docId.matches('users_chunk_.*'))
+             && (isAdmin() || isTeacher())
+           );
+
+      allow list: if isAdmin() || isTeacher();
+
+      // الكتابة: الأدمن على الكل، المدرس على المحتوى التعليمي فقط
+      allow write: if (
+        isAdmin()
+        && (
+             docId in ['courses', 'settings', 'competitions', 'notifications', 'bundles',
+                       'users', 'accessCodes', 'submissions', 'exams', 'coupons', 'support_chats']
+             || docId.matches('users_chunk_.*')
+           )
+        && !request.resource.data.keys().hasAny(['password'])
+      ) || (
+        isTeacher()
+        && docId in ['courses', 'submissions', 'exams', 'support_chats', 'coupons', 'accessCodes', 'access_codes', 'wallet_codes']
+        && !request.resource.data.keys().hasAny(['password'])
+      );
+    }
+
+    // ========================= PARENTS =========================
+    match /parents/{parentUid} {
+      allow get: if isOwner(parentUid) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ========================= COURSES =========================
+    match /courses/{courseId} {
+      allow get, list: if resource.data.isPublished == true || isTeacher() || isAdmin();
+      allow create: if isTeacher() || isAdmin();
+      allow update, delete: if (isTeacher() && (resource.data.teacherId == request.auth.uid || request.auth.token.email == 'almtflsft@gmail.com'))
+        || isAdmin();
+    }
+
+    // ========================= ENROLLMENTS =========================
+    match /enrollments/{enrollmentId} {
+      allow get: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid
+        || isParentOf(resource.data.studentId)
+        || isTeacher()
+        || isAdmin()
+      );
+      allow list: if isAdmin() || isTeacher();
+      allow create: if isAdmin() || isTeacher() || (
+        isAuthenticated()
+        && request.resource.data.studentId == request.auth.uid
+        && exists(/databases/$(database)/documents/courses/$(request.resource.data.courseId))
+        && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.price == 0
+        && get(/databases/$(database)/documents/courses/$(request.resource.data.courseId)).data.isPublished == true
+      );
+      allow update, delete: if isAdmin() || isTeacher();
+    }
+
+    // ========================= SUBMISSIONS / RESULTS =========================
+    match /submissions/{submissionId} {
+      allow get: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid
+        || isParentOf(resource.data.studentId)
+        || isTeacher()
+        || isAdmin()
+      );
+      allow list: if isAdmin() || isTeacher();
+      allow create: if isAuthenticated()
+        && request.resource.data.studentId == request.auth.uid
+        && !exists(/databases/$(database)/documents/submissions/$(submissionId));
+      allow update: if isTeacher() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /exam_results/{resultId} {
+      allow get: if isAuthenticated() && (
+        resource.data.studentId == request.auth.uid
+        || isParentOf(resource.data.studentId)
+        || isTeacher()
+        || isAdmin()
+      );
+      allow list: if isAdmin() || isTeacher();
+      allow create: if isAuthenticated()
+        && request.resource.data.studentId == request.auth.uid
+        && !exists(/databases/$(database)/documents/exam_results/$(resultId));
+      allow update: if isTeacher() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ========================= PAYMENTS =========================
+    match /payments/{paymentId} {
+      allow get: if isAuthenticated()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ========================= FORUM / NOTIF / COMPETITIONS =========================
+    match /forum_posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isAuthenticated()
+        && (resource.data.authorId == request.auth.uid || isAdmin() || isTeacher());
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (
+        resource.data.targetUserId == request.auth.uid
+        || resource.data.targetUserId == 'all'
+        || isTeacher()
+        || isAdmin()
+      );
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /competitions/{compId} {
+      allow read: if true;
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    // ========================= DEFAULT DENY =========================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

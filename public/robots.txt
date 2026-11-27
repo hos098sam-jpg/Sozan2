@@ -1,0 +1,6 @@
+# Robots.txt for منصة المتفلسفة  التعليمية
+User-agent: *
+Allow: /
+
+# Sitemaps
+Sitemap: https://sozan.pages.dev/sitemap.xml
