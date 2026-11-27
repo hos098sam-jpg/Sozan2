@@ -91,7 +91,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     : null;
 
   return (
-    <header className={`${currentUser ? 'sidebar-aware' : ''} sticky top-0 z-[9998] border-b border-neutral-800 bg-[#0D0D0F]/95 text-white backdrop-blur-md transition-colors dark:border-neutral-200/90 dark:bg-[#FFFFFF]/95 dark:text-[#151515]`}>
+    <header className={`${currentUser ? 'sidebar-aware' : ''} sticky top-[5px] z-[9998] mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-2xl border border-neutral-800 bg-[#0D0D0F]/95 text-white backdrop-blur-md transition-colors dark:border-neutral-200/90 dark:bg-[#FFFFFF]/95 dark:text-[#151515]`}>
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:gap-8 lg:px-8">
         {/* Zone 1: Menu Trigger (Mobile) */}
         <button
@@ -117,21 +117,39 @@ export const Navbar: React.FC<NavbarProps> = ({
           {onToggleTheme && (
             <button
               type="button"
+              role="switch"
+              dir="ltr"
+              aria-checked={theme === 'dark'}
               onClick={onToggleTheme}
               aria-label={theme === 'dark' ? 'التبديل إلى الوضع النهاري' : 'التبديل إلى الوضع الليلي'}
-              className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg border border-neutral-700 bg-[#18181D] px-3 text-xs font-semibold text-neutral-100 transition-colors hover:bg-[#23232B] dark:border-neutral-200 dark:bg-[#F3F4F6] dark:text-[#151515] dark:hover:bg-neutral-200"
+              className={`relative inline-flex h-8 w-16 shrink-0 cursor-pointer items-center justify-between rounded-full border px-[3px] transition-colors duration-300 ${
+                theme === 'dark'
+                  ? 'border-neutral-300 bg-neutral-200'
+                  : 'border-neutral-700 bg-[#18181D]'
+              }`}
             >
-              {theme === 'dark' ? (
-                <>
-                  <Sun className="h-4 w-4 text-amber-400" />
-                  <span>الوضع النهاري</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="h-4 w-4 text-[#1769D2]" />
-                  <span>الوضع الليلي</span>
-                </>
-              )}
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute top-[3px] left-[3px] h-6 w-6 rounded-full shadow-sm transition-transform duration-300 ease-out ${
+                  theme === 'dark'
+                    ? 'translate-x-8 bg-[#151515]'
+                    : 'translate-x-0 bg-amber-400'
+                }`}
+              />
+              <span className="relative z-10 flex h-6 w-6 items-center justify-center">
+                <Sun
+                  className={`h-3.5 w-3.5 transition-colors duration-300 ${
+                    theme === 'dark' ? 'text-amber-500/80' : 'text-[#151515]'
+                  }`}
+                />
+              </span>
+              <span className="relative z-10 flex h-6 w-6 items-center justify-center">
+                <Moon
+                  className={`h-3.5 w-3.5 transition-colors duration-300 ${
+                    theme === 'dark' ? 'text-white' : 'text-neutral-400'
+                  }`}
+                />
+              </span>
             </button>
           )}
 

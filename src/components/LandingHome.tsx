@@ -1249,7 +1249,7 @@ export const LandingHome: React.FC<LandingHomeProps> = ({
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+              <div className="flex gap-4 overflow-x-auto pb-4 pt-1 snap-x [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden md:grid md:grid-cols-2 lg:grid-cols-3">
                 {publishedCourses.slice(0, 6).map((course, idx) => {
                   const enrolled = isCourseEnrolled(course.id);
                   const totalLessonsCount = course.lessons?.length || 0;
@@ -1278,6 +1278,7 @@ export const LandingHome: React.FC<LandingHomeProps> = ({
                       key={course.id}
                       delayIndex={(idx % 3) + 1}
                       disabled={isVisualEditMode}
+                      className="w-[78%] sm:w-[55%] shrink-0 snap-start md:w-auto"
                     >
                       <div
                         onClick={() => !isVisualEditMode && onSelectCourse(course)}
